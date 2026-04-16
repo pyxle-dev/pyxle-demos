@@ -1,0 +1,170 @@
+from db import get_settings, update_setting
+from pyxle.runtime import ActionError
+
+
+@server
+async def load_settings(request):
+    settings = get_settings()
+    return {"settings": settings}
+
+
+@action
+async def save_settings(request):
+    body = await request.json()
+    company_name = body.get("company_name", "")
+    if not isinstance(company_name, str):
+        raise ActionError("Company name must be text.", status_code=400)
+    company_name = company_name.strip()
+    if not company_name:
+        raise ActionError("Company name cannot be empty.", status_code=400)
+    if len(company_name) > 100:
+        raise ActionError("Company name is too long.", status_code=400)
+
+    # Coerce boolean-ish flags to the strings the DB stores. Reject arbitrary
+    # payloads (non-bool truthy objects could otherwise round-trip as e.g.
+    # "{'malicious': 1}".lower() via str()).
+    def _flag(key: str) -> str:
+        return "true" if bool(body.get(key, False)) else "false"
+
+    update_setting("company_name", company_name)
+    update_setting("notify_signups", _flag("notify_signups"))
+    update_setting("notify_churn", _flag("notify_churn"))
+    update_setting("notify_payments", _flag("notify_payments"))
+    return {"message": "Settings saved successfully."}
+
+
+import React, { useState } from 'react';
+import { Head, useAction } from 'pyxle/client';
+
+
+/* ── Toggle Switch ──────────────────────────────────────── */
+
+function Toggle({ label, description, checked, onChange }) {
+    return (
+        <div className="flex items-center justify-between py-3">
+            <div>
+                <p className="text-sm font-medium text-zinc-200">{label}</p>
+                <p className="text-xs text-zinc-500 mt-0.5">{description}</p>
+            </div>
+            <button
+                type="button"
+                onClick={() => onChange(!checked)}
+                className={`relative w-10 h-5.5 rounded-full transition-colors ${
+                    checked ? 'bg-indigo-600' : 'bg-zinc-700'
+                }`}
+                style={{ width: '40px', height: '22px' }}
+            >
+                <span
+                    className={`absolute top-0.5 left-0.5 w-[18px] h-[18px] bg-white rounded-full transition-transform shadow-sm ${
+                        checked ? 'translate-x-[18px]' : 'translate-x-0'
+                    }`}
+                />
+            </button>
+        </div>
+    );
+}
+
+
+/* ── Settings Page ──────────────────────────────────────── */
+
+export default function SettingsPage({ data }) {
+    const { settings } = data;
+    const saveSettings = useAction('save_settings');
+
+    const [companyName, setCompanyName] = useState(settings.company_name || '');
+    const [notifySignups, setNotifySignups] = useState(settings.notify_signups === 'true');
+    const [notifyChurn, setNotifyChurn] = useState(settings.notify_churn === 'true');
+    const [notifyPayments, setNotifyPayments] = useState(settings.notify_payments === 'true');
+    const [successMsg, setSuccessMsg] = useState(null);
+
+    async function handleSave(e) {
+        e.preventDefault();
+        setSuccessMsg(null);
+        const result = await saveSettings({
+            company_name: companyName,
+            notify_signups: notifySignups,
+            notify_churn: notifyChurn,
+            notify_payments: notifyPayments,
+        });
+        if (result.ok) {
+            setSuccessMsg(result.message);
+        }
+    }
+
+    return (
+        <div>
+            <Head><title>Settings — Flux</title></Head>
+
+            {/* Header */}
+            <div className="mb-6 sm:mb-8">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Settings</h1>
+                <p className="mt-1 text-sm text-zinc-500">Manage your workspace preferences</p>
+            </div>
+
+            <form onSubmit={handleSave} className="max-w-2xl space-y-6">
+                {/* Success / Error Messages */}
+                {successMsg && (
+                    <div className="px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-sm text-emerald-400">
+                        {successMsg}
+                    </div>
+                )}
+                {saveSettings.error && (
+                    <div className="px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
+                        {saveSettings.error}
+                    </div>
+                )}
+
+                {/* Company Info */}
+                <div className="bg-[#111318] border border-white/5 rounded-xl p-6">
+                    <h2 className="text-sm font-medium text-zinc-400 mb-4">Company Information</h2>
+                    <div>
+                        <label className="block text-sm text-zinc-300 mb-2">Company Name</label>
+                        <input
+                            type="text"
+                            value={companyName}
+                            onChange={e => setCompanyName(e.target.value)}
+                            className="w-full bg-[#0a0a0f] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                            placeholder="Your company name"
+                        />
+                    </div>
+                </div>
+
+                {/* Notifications */}
+                <div className="bg-[#111318] border border-white/5 rounded-xl p-6">
+                    <h2 className="text-sm font-medium text-zinc-400 mb-2">Notifications</h2>
+                    <div className="divide-y divide-white/5">
+                        <Toggle
+                            label="New signups"
+                            description="Get notified when a new customer signs up"
+                            checked={notifySignups}
+                            onChange={setNotifySignups}
+                        />
+                        <Toggle
+                            label="Customer churn"
+                            description="Get notified when a customer cancels"
+                            checked={notifyChurn}
+                            onChange={setNotifyChurn}
+                        />
+                        <Toggle
+                            label="Payments received"
+                            description="Get notified for every payment"
+                            checked={notifyPayments}
+                            onChange={setNotifyPayments}
+                        />
+                    </div>
+                </div>
+
+                {/* Save Button */}
+                <div className="flex justify-end">
+                    <button
+                        type="submit"
+                        disabled={saveSettings.pending}
+                        className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm font-medium text-white transition-colors"
+                    >
+                        {saveSettings.pending ? 'Saving...' : 'Save Settings'}
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+}

@@ -1,0 +1,13 @@
+node_modules/
+.pyxle-build/
+dist/
+__pycache__/
+*.pyc
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+.claude/
+.DS_Store

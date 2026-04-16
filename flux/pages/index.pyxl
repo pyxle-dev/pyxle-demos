@@ -1,0 +1,245 @@
+from db import get_dashboard_metrics, get_monthly_mrr, get_recent_activity
+
+
+@server
+async def load_dashboard(request):
+    metrics = get_dashboard_metrics()
+    monthly = get_monthly_mrr()
+    activity = get_recent_activity(limit=8)
+
+    # Python-powered revenue forecast (simple linear trend)
+    values = [m["mrr"] for m in monthly]
+    if len(values) >= 2:
+        slope = (values[-1] - values[0]) / (len(values) - 1)
+        forecast = round(values[-1] + slope)
+    else:
+        forecast = values[-1] if values else 0
+
+    return {
+        "metrics": metrics,
+        "monthly": monthly,
+        "activity": activity,
+        "forecast": forecast,
+    }
+
+
+import React from 'react';
+import { Head } from 'pyxle/client';
+
+
+/* ── Helpers ────────────────────────────────────────────── */
+
+function formatCurrency(cents) {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    }).format(cents / 100);
+}
+
+function formatMonth(monthStr) {
+    const [y, m] = monthStr.split('-');
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months[parseInt(m, 10) - 1];
+}
+
+function timeAgo(dateStr) {
+    const now = new Date();
+    const then = new Date(dateStr);
+    const diffMs = now - then;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 30) return `${diffDays}d ago`;
+    return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const EVENT_STYLES = {
+    signup:  { bg: 'bg-emerald-500/10', text: 'text-emerald-400', label: 'Signup' },
+    upgrade: { bg: 'bg-indigo-500/10',  text: 'text-indigo-400',  label: 'Upgrade' },
+    payment: { bg: 'bg-sky-500/10',     text: 'text-sky-400',     label: 'Payment' },
+    churn:   { bg: 'bg-red-500/10',     text: 'text-red-400',     label: 'Churn' },
+};
+
+
+/* ── KPI Card ───────────────────────────────────────────── */
+
+function KpiCard({ label, value, change, changeLabel, positive }) {
+    return (
+        <div className="bg-[#111318] border border-white/5 rounded-xl p-5 sm:p-6">
+            <p className="text-sm text-zinc-500 font-medium">{label}</p>
+            <p className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">{value}</p>
+            <div className="mt-2 flex items-center gap-1.5">
+                <span className={`text-xs font-medium ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {positive ? '\u2191' : '\u2193'} {change}
+                </span>
+                <span className="text-xs text-zinc-600">{changeLabel}</span>
+            </div>
+        </div>
+    );
+}
+
+
+/* ── Revenue Chart ──────────────────────────────────────── */
+
+function RevenueChart({ monthly, forecast }) {
+    const maxMrr = Math.max(...monthly.map(m => m.mrr), forecast);
+
+    return (
+        <div className="bg-[#111318] border border-white/5 rounded-xl p-5 sm:p-6">
+            <div className="flex items-center justify-between mb-6">
+                <div>
+                    <h3 className="text-sm font-medium text-zinc-400">Monthly Recurring Revenue</h3>
+                    <p className="text-xs text-zinc-600 mt-0.5">Last 12 months + forecast</p>
+                </div>
+                <div className="text-right">
+                    <p className="text-xs text-zinc-500">Next month forecast</p>
+                    <p className="text-sm font-semibold text-indigo-400">{formatCurrency(forecast)}</p>
+                </div>
+            </div>
+
+            <div className="flex items-end gap-1.5 sm:gap-2 h-44">
+                {monthly.map((m, i) => {
+                    const height = (m.mrr / maxMrr) * 100;
+                    const isLast = i === monthly.length - 1;
+                    return (
+                        <div key={m.month} className="flex-1 flex flex-col items-center gap-1.5 group">
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-zinc-400 font-medium whitespace-nowrap">
+                                {formatCurrency(m.mrr)}
+                            </div>
+                            <div className="w-full relative h-32">
+                                <div
+                                    className={`absolute bottom-0 w-full rounded-t transition-all ${
+                                        isLast
+                                            ? 'bg-gradient-to-t from-indigo-600 to-indigo-400'
+                                            : 'bg-gradient-to-t from-indigo-600/60 to-indigo-400/60 group-hover:from-indigo-600 group-hover:to-indigo-400'
+                                    }`}
+                                    style={{ height: `${height}%` }}
+                                />
+                            </div>
+                            <span className={`text-[10px] ${isLast ? 'text-indigo-400 font-semibold' : 'text-zinc-600'}`}>
+                                {formatMonth(m.month)}
+                            </span>
+                        </div>
+                    );
+                })}
+
+                {/* Forecast bar */}
+                <div className="flex-1 flex flex-col items-center gap-1.5 group">
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-zinc-400 font-medium whitespace-nowrap">
+                        {formatCurrency(forecast)}
+                    </div>
+                    <div className="w-full relative h-32">
+                        <div
+                            className="absolute bottom-0 w-full rounded-t bg-gradient-to-t from-indigo-600/30 to-indigo-400/30 border border-dashed border-indigo-400/40"
+                            style={{ height: `${(forecast / maxMrr) * 100}%` }}
+                        />
+                    </div>
+                    <span className="text-[10px] text-zinc-600 italic">Next</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+
+/* ── Activity Feed ──────────────────────────────────────── */
+
+function ActivityFeed({ activity }) {
+    return (
+        <div className="bg-[#111318] border border-white/5 rounded-xl p-5 sm:p-6">
+            <h3 className="text-sm font-medium text-zinc-400 mb-4">Recent Activity</h3>
+            <div className="space-y-3">
+                {activity.map(event => {
+                    const style = EVENT_STYLES[event.event_type] || EVENT_STYLES.signup;
+                    return (
+                        <div key={event.id} className="flex items-start gap-3">
+                            <div className={`mt-0.5 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${style.bg} ${style.text}`}>
+                                {event.customer_name ? event.customer_name.charAt(0) : '?'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium text-zinc-200 truncate">
+                                        {event.customer_name || 'Unknown'}
+                                    </span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${style.bg} ${style.text}`}>
+                                        {style.label}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-zinc-500 mt-0.5">{event.description}</p>
+                            </div>
+                            <span className="text-[10px] text-zinc-600 whitespace-nowrap shrink-0">
+                                {timeAgo(event.created_at)}
+                            </span>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+
+/* ── Dashboard Page ─────────────────────────────────────── */
+
+export default function Dashboard({ data }) {
+    const { metrics, monthly, activity, forecast } = data;
+
+    return (
+        <div>
+            <Head><title>Dashboard — Flux</title></Head>
+
+            {/* Header */}
+            <div className="mb-6 sm:mb-8">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard</h1>
+                <p className="mt-1 text-sm text-zinc-500">Your SaaS metrics at a glance</p>
+            </div>
+
+            {/* KPI Grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
+                <KpiCard
+                    label="Monthly Revenue"
+                    value={formatCurrency(metrics.mrr)}
+                    change={`${Math.abs(metrics.mrr_change)}%`}
+                    changeLabel="vs last month"
+                    positive={metrics.mrr_change >= 0}
+                />
+                <KpiCard
+                    label="Total Customers"
+                    value={metrics.customers.toLocaleString()}
+                    change={`${Math.abs(metrics.customers_change)}`}
+                    changeLabel="vs last month"
+                    positive={metrics.customers_change >= 0}
+                />
+                <KpiCard
+                    label="New Signups"
+                    value={metrics.new_signups}
+                    change={`${Math.abs(metrics.signups_change)}`}
+                    changeLabel="vs last month"
+                    positive={metrics.signups_change >= 0}
+                />
+                <KpiCard
+                    label="Churn Rate"
+                    value={`${metrics.churn_rate}%`}
+                    change={`${Math.abs(metrics.churn_change)}%`}
+                    changeLabel="vs last month"
+                    positive={metrics.churn_change <= 0}
+                />
+            </div>
+
+            {/* Chart + Activity */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
+                <div className="xl:col-span-2">
+                    <RevenueChart monthly={monthly} forecast={forecast} />
+                </div>
+                <div>
+                    <ActivityFeed activity={activity} />
+                </div>
+            </div>
+        </div>
+    );
+}

@@ -1,0 +1,5 @@
+node_modules/
+.pyxle-build/
+__pycache__/
+.env
+.env.local

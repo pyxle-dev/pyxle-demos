@@ -1,0 +1,184 @@
+from palettes import get_all_palettes
+from colors import random_palette, analyze_palette, is_light
+
+
+@server
+async def load_home(request):
+    palettes = get_all_palettes()
+    featured = palettes[:6]
+    return {"palettes": featured}
+
+
+@action
+async def generate_random(request):
+    base, colors, harmony = random_palette()
+    analysis = analyze_palette(colors)
+    return {
+        "base": base,
+        "colors": colors,
+        "harmony": harmony,
+        "analysis": analysis,
+    }
+
+
+import React, { useState } from 'react';
+import { Head, Link, useAction } from 'pyxle/client';
+
+
+function PaletteCard({ palette }) {
+    return (
+        <Link
+            href={`/palette/${palette.id}`}
+            className="group block rounded-2xl overflow-hidden bg-white border border-zinc-100 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
+        >
+            <div className="flex h-28">
+                {palette.colors.map((color, i) => (
+                    <div key={i} className="flex-1" style={{ backgroundColor: color }} />
+                ))}
+            </div>
+            <div className="px-4 py-3">
+                <h3 className="text-sm font-semibold text-zinc-800 group-hover:text-violet-600 transition-colors">
+                    {palette.name}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5 capitalize">{palette.mood}</p>
+            </div>
+        </Link>
+    );
+}
+
+
+function ColorSwatch({ color, analysis }) {
+    const [copied, setCopied] = useState(false);
+    const textColor = analysis?.isLight ? '#000000' : '#FFFFFF';
+
+    function handleCopy() {
+        navigator.clipboard.writeText(color).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+        });
+    }
+
+    return (
+        <button
+            onClick={handleCopy}
+            className="flex-1 h-32 sm:h-40 rounded-2xl flex items-end justify-center pb-3 transition-transform hover:scale-105 cursor-pointer"
+            style={{ backgroundColor: color }}
+        >
+            <span className="text-xs font-mono font-medium opacity-80" style={{ color: textColor }}>
+                {copied ? 'Copied!' : color}
+            </span>
+        </button>
+    );
+}
+
+
+export default function HomePage({ data }) {
+    const generateRandom = useAction('generate_random');
+    const [generated, setGenerated] = useState(null);
+
+    async function handleGenerate() {
+        const result = await generateRandom();
+        if (result.ok) {
+            setGenerated(result);
+        }
+    }
+
+    return (
+        <div>
+            <Head><title>Chroma — Color Palettes Powered by Python</title></Head>
+
+            {/* Hero */}
+            <section className="relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-violet-50 via-pink-50 to-orange-50" />
+                <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 sm:pt-24 pb-12 sm:pb-16">
+                    <div className="text-center max-w-2xl mx-auto">
+                        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight">
+                            <span className="bg-gradient-to-r from-violet-600 via-pink-600 to-orange-500 bg-clip-text text-transparent">
+                                Beautiful palettes
+                            </span>
+                            <br />
+                            <span className="text-zinc-900">powered by Python</span>
+                        </h1>
+                        <p className="mt-4 text-lg text-zinc-500 leading-relaxed">
+                            Color harmony algorithms built with Python's <code className="text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded text-sm">colorsys</code> module.
+                            Generate, explore, and create perfect palettes.
+                        </p>
+                        <button
+                            onClick={handleGenerate}
+                            disabled={generateRandom.pending}
+                            className="mt-8 px-8 py-3 bg-gradient-to-r from-violet-600 to-pink-600 text-white font-semibold rounded-full shadow-lg shadow-violet-200 hover:shadow-xl hover:shadow-violet-300 transition-all disabled:opacity-60"
+                        >
+                            {generateRandom.pending ? 'Generating...' : 'Generate Random Palette'}
+                        </button>
+                    </div>
+
+                    {/* Generated palette preview */}
+                    {generated && (
+                        <div className="mt-10 max-w-xl mx-auto">
+                            <div className="flex gap-2 sm:gap-3">
+                                {generated.colors.map((color, i) => (
+                                    <ColorSwatch key={i} color={color} analysis={generated.analysis[i]} />
+                                ))}
+                            </div>
+                            <p className="text-center mt-3 text-sm text-zinc-400">
+                                {generated.harmony.replace('-', ' ')} harmony from{' '}
+                                <span className="font-mono text-violet-600">{generated.base}</span>
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            {/* Featured Palettes */}
+            <section className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
+                <div className="flex items-center justify-between mb-8">
+                    <div>
+                        <h2 className="text-2xl font-bold text-zinc-900">Featured Palettes</h2>
+                        <p className="text-sm text-zinc-400 mt-1">Curated collections for every mood</p>
+                    </div>
+                    <Link
+                        href="/explore"
+                        className="text-sm font-medium text-violet-600 hover:text-violet-700 transition-colors"
+                    >
+                        View all &rarr;
+                    </Link>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {data.palettes.map(palette => (
+                        <PaletteCard key={palette.id} palette={palette} />
+                    ))}
+                </div>
+            </section>
+
+            {/* How it works */}
+            <section className="bg-zinc-50 border-y border-zinc-100">
+                <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
+                    <h2 className="text-2xl font-bold text-zinc-900 text-center mb-10">How It Works</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
+                        <div className="text-center">
+                            <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto mb-4">
+                                <span className="text-xl">🎨</span>
+                            </div>
+                            <h3 className="font-semibold text-zinc-800">Pick a Color</h3>
+                            <p className="text-sm text-zinc-500 mt-2">Choose any base color using the color picker</p>
+                        </div>
+                        <div className="text-center">
+                            <div className="w-12 h-12 rounded-2xl bg-pink-100 flex items-center justify-center mx-auto mb-4">
+                                <span className="text-xl">🐍</span>
+                            </div>
+                            <h3 className="font-semibold text-zinc-800">Python Does the Math</h3>
+                            <p className="text-sm text-zinc-500 mt-2">Server-side color theory via <code className="text-violet-500">colorsys</code></p>
+                        </div>
+                        <div className="text-center">
+                            <div className="w-12 h-12 rounded-2xl bg-orange-100 flex items-center justify-center mx-auto mb-4">
+                                <span className="text-xl">✨</span>
+                            </div>
+                            <h3 className="font-semibold text-zinc-800">Get Your Palette</h3>
+                            <p className="text-sm text-zinc-500 mt-2">Five harmonious colors, ready to use</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    );
+}

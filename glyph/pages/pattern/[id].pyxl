@@ -1,0 +1,148 @@
+from patterns import get_gallery_item, PATTERN_INFO
+import math
+
+
+@server
+async def load_pattern(request):
+    item_id = request.path_params["id"]
+    item = get_gallery_item(item_id)
+    if not item:
+        return {"item": None}
+
+    # Compute additional math facts for the detail view
+    pattern_type = item["type"]
+    facts = []
+    params = item["params"]
+
+    if pattern_type == "spirograph":
+        R, r = params.get("R", 100), params.get("r", 63)
+        gcd = math.gcd(int(R), int(r))
+        facts.append(f"The pen traces {int(R / gcd)} loops before repeating")
+        facts.append(f"GCD({int(R)}, {int(r)}) = {gcd}")
+    elif pattern_type == "rose":
+        k = params.get("k", 5)
+        if k == int(k):
+            petals = int(k) if int(k) % 2 == 1 else int(k) * 2
+            facts.append(f"k={int(k)} produces {petals} petals")
+        facts.append("Defined by the polar equation r = cos(k\u00b7\u03b8)")
+    elif pattern_type == "mandala":
+        petals = params.get("petals", 12)
+        layers = params.get("layers", 4)
+        facts.append(f"{petals * layers} individual petal shapes")
+        facts.append(f"Rotational symmetry of order {petals}")
+    elif pattern_type == "star":
+        pts = params.get("points", 7)
+        facts.append(f"Interior angle: {round(180 - 360 / pts, 1)}\u00b0")
+        facts.append(f"{pts * 2} vertices (alternating inner/outer)")
+    elif pattern_type == "lissajous":
+        a, b = params.get("a", 3), params.get("b", 4)
+        facts.append(f"Frequency ratio {a}:{b}")
+        facts.append(f"Phase shift: {round(params.get('delta', 0), 4)} radians")
+    elif pattern_type == "waves":
+        waves = params.get("waves", 5)
+        freq = params.get("frequency_base", 3)
+        facts.append(f"{waves} superimposed sine waves")
+        facts.append(f"Frequencies from {freq:.1f} to {freq + (waves - 1) * 0.7:.1f} Hz")
+
+    return {"item": item, "facts": facts}
+
+
+import React from 'react';
+import { Head, Link } from 'pyxle/client';
+
+
+export default function PatternDetailPage({ data }) {
+    const { item, facts } = data;
+
+    if (!item) {
+        return (
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center">
+                <Head><title>Pattern Not Found — Glyph</title></Head>
+                <h1 className="text-2xl font-bold mb-2">Pattern not found</h1>
+                <p className="text-zinc-500 mb-6">This pattern doesn't exist.</p>
+                <Link href="/" className="text-sm text-violet-400 hover:text-violet-300">&larr; Back to gallery</Link>
+            </div>
+        );
+    }
+
+    return (
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14">
+            <Head><title>{item.name} — Glyph</title></Head>
+
+            <Link href="/" className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
+                &larr; Back to gallery
+            </Link>
+
+            <div className="mt-6 grid grid-cols-1 lg:grid-cols-5 gap-8">
+                {/* Pattern SVG */}
+                <div className="lg:col-span-3">
+                    <div className="bg-[#0e0e14] border border-white/5 rounded-2xl p-8 flex items-center justify-center">
+                        <svg viewBox="0 0 400 400" className="w-full max-w-lg">
+                            {item.paths.map((path, i) => (
+                                <path
+                                    key={i}
+                                    d={path.d}
+                                    fill={path.d.includes('Z') && item.type === 'mandala' ? path.color : 'none'}
+                                    stroke={item.type === 'mandala' ? path.color : path.color}
+                                    strokeWidth={item.type === 'mandala' ? 0.5 : 1.5}
+                                    opacity={path.opacity || 1}
+                                />
+                            ))}
+                        </svg>
+                    </div>
+                </div>
+
+                {/* Info Panel */}
+                <div className="lg:col-span-2 space-y-6">
+                    <div>
+                        <div className="flex items-center gap-3 mb-2">
+                            <span className="text-2xl">{item.info?.icon}</span>
+                            <h1 className="text-2xl font-bold">{item.name}</h1>
+                        </div>
+                        <p className="text-sm text-zinc-400">{item.info?.desc}</p>
+                    </div>
+
+                    {/* Parameters */}
+                    <div className="bg-[#0e0e14] border border-white/5 rounded-xl p-5">
+                        <h2 className="text-sm font-medium text-zinc-400 mb-3">Parameters</h2>
+                        <div className="space-y-2">
+                            {Object.entries(item.params).map(([key, value]) => (
+                                <div key={key} className="flex justify-between items-center">
+                                    <span className="text-sm text-zinc-500 font-mono">{key}</span>
+                                    <span className="text-sm text-zinc-200 font-mono">{typeof value === 'number' ? value.toFixed(value % 1 ? 4 : 0) : value}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Math Facts */}
+                    {facts && facts.length > 0 && (
+                        <div className="bg-[#0e0e14] border border-white/5 rounded-xl p-5">
+                            <h2 className="text-sm font-medium text-zinc-400 mb-3">Math Facts</h2>
+                            <ul className="space-y-2">
+                                {facts.map((fact, i) => (
+                                    <li key={i} className="flex items-start gap-2">
+                                        <span className="text-violet-400 mt-0.5">•</span>
+                                        <span className="text-sm text-zinc-300">{fact}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {/* Algorithm */}
+                    <div className="bg-[#0e0e14] border border-white/5 rounded-xl p-5">
+                        <h2 className="text-sm font-medium text-zinc-400 mb-2">Algorithm</h2>
+                        <p className="text-xs text-zinc-500 leading-relaxed">
+                            Generated with <code className="text-violet-400">math.sin()</code> and{' '}
+                            <code className="text-violet-400">math.cos()</code> in Python.
+                            {item.paths.length > 1
+                                ? ` ${item.paths.length} SVG paths computed from ${Object.keys(item.params).length} parameters.`
+                                : ` Single SVG path computed from ${Object.keys(item.params).length} parameters.`}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}

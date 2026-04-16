@@ -1,0 +1,201 @@
+from db import get_customers
+
+
+@server
+async def load_customers(request):
+    customers = get_customers()
+    return {"customers": customers}
+
+
+import React, { useState } from 'react';
+import { Head, Link } from 'pyxle/client';
+
+
+/* ── Helpers ────────────────────────────────────────────── */
+
+function formatCurrency(cents) {
+    if (cents === 0) return '$0';
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    }).format(cents / 100);
+}
+
+const PLAN_STYLES = {
+    free:       { bg: 'bg-zinc-500/10',    text: 'text-zinc-400',    label: 'Free' },
+    pro:        { bg: 'bg-sky-500/10',     text: 'text-sky-400',     label: 'Pro' },
+    business:   { bg: 'bg-amber-500/10',   text: 'text-amber-400',   label: 'Business' },
+    enterprise: { bg: 'bg-indigo-500/10',  text: 'text-indigo-400',  label: 'Enterprise' },
+};
+
+const STATUS_STYLES = {
+    active:  { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400' },
+    churned: { bg: 'bg-red-500/10',     text: 'text-red-400',     dot: 'bg-red-400' },
+    trial:   { bg: 'bg-amber-500/10',   text: 'text-amber-400',   dot: 'bg-amber-400' },
+};
+
+
+/* ── Search Icon ────────────────────────────────────────── */
+
+function IconSearch() {
+    return (
+        <svg className="w-4 h-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+        </svg>
+    );
+}
+
+
+/* ── Customer Row ───────────────────────────────────────── */
+
+function CustomerRow({ customer }) {
+    const plan = PLAN_STYLES[customer.plan] || PLAN_STYLES.free;
+    const status = STATUS_STYLES[customer.status] || STATUS_STYLES.trial;
+
+    return (
+        <Link
+            href={`/customers/${customer.id}`}
+            className="flex items-center gap-4 px-4 sm:px-5 py-3.5 hover:bg-white/[0.02] transition-colors border-b border-white/5 last:border-b-0 group"
+        >
+            {/* Avatar */}
+            <div
+                className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
+                style={{ backgroundColor: customer.avatar_color }}
+            >
+                {customer.name.charAt(0)}
+            </div>
+
+            {/* Name + Email */}
+            <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors truncate">
+                    {customer.name}
+                </p>
+                <p className="text-xs text-zinc-500 truncate">{customer.email}</p>
+            </div>
+
+            {/* Company — hidden on mobile */}
+            <div className="hidden sm:block w-32 text-sm text-zinc-400 truncate">
+                {customer.company}
+            </div>
+
+            {/* Plan Badge */}
+            <div className="hidden sm:block">
+                <span className={`text-[11px] px-2 py-1 rounded-full font-medium ${plan.bg} ${plan.text}`}>
+                    {plan.label}
+                </span>
+            </div>
+
+            {/* MRR */}
+            <div className="w-20 text-right">
+                <span className="text-sm font-medium text-zinc-300">{formatCurrency(customer.mrr)}</span>
+                <span className="text-[10px] text-zinc-600 block">/mo</span>
+            </div>
+
+            {/* Status */}
+            <div className="hidden md:flex items-center gap-1.5 w-20">
+                <div className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
+                <span className={`text-xs ${status.text} capitalize`}>{customer.status}</span>
+            </div>
+
+            {/* Arrow */}
+            <svg className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+        </Link>
+    );
+}
+
+
+/* ── Customers Page ─────────────────────────────────────── */
+
+export default function CustomersPage({ data }) {
+    const [search, setSearch] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+
+    const filtered = data.customers.filter(c => {
+        const matchesSearch = !search ||
+            c.name.toLowerCase().includes(search.toLowerCase()) ||
+            c.email.toLowerCase().includes(search.toLowerCase()) ||
+            c.company.toLowerCase().includes(search.toLowerCase());
+        const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
+        return matchesSearch && matchesStatus;
+    });
+
+    const counts = {
+        all: data.customers.length,
+        active: data.customers.filter(c => c.status === 'active').length,
+        trial: data.customers.filter(c => c.status === 'trial').length,
+        churned: data.customers.filter(c => c.status === 'churned').length,
+    };
+
+    return (
+        <div>
+            <Head><title>Customers — Flux</title></Head>
+
+            {/* Header */}
+            <div className="mb-6 sm:mb-8">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Customers</h1>
+                <p className="mt-1 text-sm text-zinc-500">{data.customers.length} total customers across all plans</p>
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center mb-5">
+                {/* Search */}
+                <div className="relative flex-1 max-w-sm">
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                        <IconSearch />
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Search customers..."
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        className="w-full bg-[#111318] border border-white/5 rounded-lg pl-9 pr-4 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/25 transition-colors"
+                    />
+                </div>
+
+                {/* Status tabs */}
+                <div className="flex gap-1 bg-[#111318] border border-white/5 rounded-lg p-1">
+                    {['all', 'active', 'trial', 'churned'].map(s => (
+                        <button
+                            key={s}
+                            onClick={() => setStatusFilter(s)}
+                            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors capitalize ${
+                                statusFilter === s
+                                    ? 'bg-white/10 text-white'
+                                    : 'text-zinc-500 hover:text-zinc-300'
+                            }`}
+                        >
+                            {s} ({counts[s]})
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {/* Customer List */}
+            <div className="bg-[#111318] border border-white/5 rounded-xl overflow-hidden">
+                {/* Table Header */}
+                <div className="flex items-center gap-4 px-4 sm:px-5 py-3 border-b border-white/5 text-xs text-zinc-500 font-medium uppercase tracking-wider">
+                    <div className="w-9 shrink-0" />
+                    <div className="flex-1">Name</div>
+                    <div className="hidden sm:block w-32">Company</div>
+                    <div className="hidden sm:block w-20">Plan</div>
+                    <div className="w-20 text-right">MRR</div>
+                    <div className="hidden md:block w-20">Status</div>
+                    <div className="w-4 shrink-0" />
+                </div>
+
+                {/* Rows */}
+                {filtered.length > 0 ? (
+                    filtered.map(c => <CustomerRow key={c.id} customer={c} />)
+                ) : (
+                    <div className="px-5 py-12 text-center text-sm text-zinc-500">
+                        No customers match your search.
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}

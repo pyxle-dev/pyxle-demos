@@ -1,0 +1,99 @@
+from palettes import get_all_palettes, get_moods
+
+
+@server
+async def load_explore(request):
+    palettes = get_all_palettes()
+    moods = get_moods()
+    return {"palettes": palettes, "moods": moods}
+
+
+import React, { useState } from 'react';
+import { Head, Link } from 'pyxle/client';
+
+
+function PaletteCard({ palette }) {
+    return (
+        <Link
+            href={`/palette/${palette.id}`}
+            className="group block rounded-2xl overflow-hidden bg-white border border-zinc-100 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
+        >
+            <div className="flex h-24 sm:h-28">
+                {palette.colors.map((color, i) => (
+                    <div key={i} className="flex-1" style={{ backgroundColor: color }} />
+                ))}
+            </div>
+            <div className="px-4 py-3">
+                <h3 className="text-sm font-semibold text-zinc-800 group-hover:text-violet-600 transition-colors">
+                    {palette.name}
+                </h3>
+                <p className="text-xs text-zinc-400 mt-0.5 capitalize">{palette.mood}</p>
+            </div>
+        </Link>
+    );
+}
+
+
+const MOOD_EMOJIS = {
+    warm: '🔥', cool: '❄️', pastel: '🌸', vibrant: '⚡', earth: '🌿', monochrome: '🌑',
+};
+
+
+export default function ExplorePage({ data }) {
+    const [selectedMood, setSelectedMood] = useState('all');
+
+    const filtered = selectedMood === 'all'
+        ? data.palettes
+        : data.palettes.filter(p => p.mood === selectedMood);
+
+    return (
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14">
+            <Head><title>Explore Palettes — Chroma</title></Head>
+
+            <div className="mb-8">
+                <h1 className="text-3xl font-bold text-zinc-900">Explore Palettes</h1>
+                <p className="text-sm text-zinc-500 mt-1">{data.palettes.length} curated palettes across {data.moods.length} moods</p>
+            </div>
+
+            {/* Mood Filter */}
+            <div className="flex flex-wrap gap-2 mb-8">
+                <button
+                    onClick={() => setSelectedMood('all')}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                        selectedMood === 'all'
+                            ? 'bg-zinc-900 text-white shadow-md'
+                            : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                    }`}
+                >
+                    All ({data.palettes.length})
+                </button>
+                {data.moods.map(mood => (
+                    <button
+                        key={mood}
+                        onClick={() => setSelectedMood(mood)}
+                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all capitalize ${
+                            selectedMood === mood
+                                ? 'bg-zinc-900 text-white shadow-md'
+                                : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                        }`}
+                    >
+                        {MOOD_EMOJIS[mood] || ''} {mood} ({data.palettes.filter(p => p.mood === mood).length})
+                    </button>
+                ))}
+            </div>
+
+            {/* Palette Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {filtered.map(palette => (
+                    <PaletteCard key={palette.id} palette={palette} />
+                ))}
+            </div>
+
+            {filtered.length === 0 && (
+                <div className="text-center py-16">
+                    <p className="text-zinc-400">No palettes found for this mood.</p>
+                </div>
+            )}
+        </div>
+    );
+}

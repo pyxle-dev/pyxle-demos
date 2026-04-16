@@ -1,0 +1,21 @@
+import React from 'react';
+import { Head, Link } from 'pyxle/client';
+
+export default function NotFoundPage() {
+    return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+            <Head><title>Page Not Found — Flux</title></Head>
+            <p className="text-6xl font-bold text-indigo-500/30 mb-4">404</p>
+            <h1 className="text-xl font-bold text-zinc-200 mb-2">Page not found</h1>
+            <p className="text-sm text-zinc-500 mb-8 max-w-sm">
+                The page you're looking for doesn't exist or has been moved.
+            </p>
+            <Link
+                href="/"
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium text-white transition-colors"
+            >
+                Back to Dashboard
+            </Link>
+        </div>
+    );
+}

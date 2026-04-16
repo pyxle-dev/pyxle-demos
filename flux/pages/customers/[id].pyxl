@@ -1,0 +1,234 @@
+from db import get_customer, get_customer_activity, update_customer_plan
+from pyxle.runtime import ActionError
+
+
+@server
+async def load_customer(request):
+    raw_id = request.path_params.get("id", "")
+    try:
+        customer_id = int(raw_id)
+    except (TypeError, ValueError):
+        return {"customer": None, "activity": []}
+    if customer_id < 1:
+        return {"customer": None, "activity": []}
+    customer = get_customer(customer_id)
+    if not customer:
+        return {"customer": None, "activity": []}
+    activity = get_customer_activity(customer_id)
+    return {"customer": customer, "activity": activity}
+
+
+@action
+async def change_plan(request):
+    body = await request.json()
+    raw_id = body.get("customer_id")
+    try:
+        customer_id = int(raw_id)
+    except (TypeError, ValueError):
+        raise ActionError("Invalid customer ID.", status_code=400)
+    if customer_id < 1:
+        raise ActionError("Invalid customer ID.", status_code=400)
+
+    plan = body.get("plan", "").lower() if isinstance(body.get("plan"), str) else ""
+    if plan not in ("free", "pro", "business", "enterprise"):
+        raise ActionError("Invalid plan.", status_code=400)
+
+    if not get_customer(customer_id):
+        raise ActionError("Customer not found.", status_code=404)
+
+    mrr_map = {"free": 0, "pro": 7900, "business": 29900, "enterprise": 249900}
+    update_customer_plan(customer_id, plan, mrr_map[plan])
+    return {"message": f"Plan updated to {plan.title()}."}
+
+
+import React, { useState } from 'react';
+import { Head, Link, useAction } from 'pyxle/client';
+
+
+/* ── Helpers ────────────────────────────────────────────── */
+
+function formatCurrency(cents) {
+    if (cents === 0) return '$0';
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    }).format(cents / 100);
+}
+
+function formatDate(dateStr) {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'long', day: 'numeric',
+    });
+}
+
+const PLAN_CONFIG = {
+    free:       { label: 'Free',       price: '$0/mo',    bg: 'bg-zinc-500/10',   text: 'text-zinc-400',   border: 'border-zinc-500/20',   ring: 'ring-zinc-500/30' },
+    pro:        { label: 'Pro',        price: '$79/mo',   bg: 'bg-sky-500/10',    text: 'text-sky-400',    border: 'border-sky-500/20',    ring: 'ring-sky-500/30' },
+    business:   { label: 'Business',   price: '$299/mo',  bg: 'bg-amber-500/10',  text: 'text-amber-400',  border: 'border-amber-500/20',  ring: 'ring-amber-500/30' },
+    enterprise: { label: 'Enterprise', price: '$2,499/mo', bg: 'bg-indigo-500/10', text: 'text-indigo-400', border: 'border-indigo-500/20', ring: 'ring-indigo-500/30' },
+};
+
+const EVENT_ICONS = {
+    signup:    { bg: 'bg-emerald-500/10', text: 'text-emerald-400', icon: '+' },
+    upgrade:   { bg: 'bg-indigo-500/10',  text: 'text-indigo-400',  icon: '\u2191' },
+    downgrade: { bg: 'bg-amber-500/10',   text: 'text-amber-400',   icon: '\u2193' },
+    payment:   { bg: 'bg-sky-500/10',     text: 'text-sky-400',     icon: '$' },
+    churn:     { bg: 'bg-red-500/10',     text: 'text-red-400',     icon: '\u00d7' },
+};
+
+
+/* ── Customer Detail Page ───────────────────────────────── */
+
+export default function CustomerDetail({ data }) {
+    const { customer, activity } = data;
+    const changePlan = useAction('change_plan');
+    const [successMsg, setSuccessMsg] = useState(null);
+    const [activePlan, setActivePlan] = useState(customer ? customer.plan : 'free');
+
+    if (!customer) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[50vh]">
+                <h1 className="text-2xl font-bold mb-2">Customer Not Found</h1>
+                <p className="text-zinc-500 mb-6">This customer doesn't exist.</p>
+                <Link href="/customers" className="text-sm text-indigo-400 hover:text-indigo-300">
+                    &larr; Back to customers
+                </Link>
+            </div>
+        );
+    }
+
+    const currentPlan = PLAN_CONFIG[activePlan] || PLAN_CONFIG.free;
+
+    async function handlePlanChange(plan) {
+        if (plan === activePlan) return;
+        setSuccessMsg(null);
+        const result = await changePlan({ customer_id: customer.id, plan });
+        if (result.ok) {
+            setActivePlan(plan);
+            setSuccessMsg(result.message);
+        }
+    }
+
+    return (
+        <div>
+            <Head><title>{customer.name} — Flux</title></Head>
+
+            {/* Breadcrumb */}
+            <div className="mb-6">
+                <Link href="/customers" className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">
+                    &larr; Back to customers
+                </Link>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Profile Card */}
+                <div className="lg:col-span-1">
+                    <div className="bg-[#111318] border border-white/5 rounded-xl p-6">
+                        <div className="flex flex-col items-center text-center">
+                            <div
+                                className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold text-white mb-4"
+                                style={{ backgroundColor: customer.avatar_color }}
+                            >
+                                {customer.name.charAt(0)}
+                            </div>
+                            <h1 className="text-xl font-bold">{customer.name}</h1>
+                            <p className="text-sm text-zinc-500 mt-1">{customer.email}</p>
+                            <p className="text-sm text-zinc-400 mt-0.5">{customer.company}</p>
+                        </div>
+
+                        <div className="mt-6 pt-6 border-t border-white/5 space-y-4">
+                            <div className="flex justify-between">
+                                <span className="text-sm text-zinc-500">Plan</span>
+                                <span className={`text-sm font-medium ${currentPlan.text}`}>{currentPlan.label}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-sm text-zinc-500">MRR</span>
+                                <span className="text-sm font-medium text-zinc-200">{formatCurrency(customer.mrr)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-sm text-zinc-500">Status</span>
+                                <span className={`text-sm font-medium capitalize ${
+                                    customer.status === 'active' ? 'text-emerald-400' :
+                                    customer.status === 'churned' ? 'text-red-400' : 'text-amber-400'
+                                }`}>
+                                    {customer.status}
+                                </span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-sm text-zinc-500">Joined</span>
+                                <span className="text-sm text-zinc-300">{formatDate(customer.joined_at)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Main Content */}
+                <div className="lg:col-span-2 space-y-6">
+                    {/* Plan Selector */}
+                    <div className="bg-[#111318] border border-white/5 rounded-xl p-6">
+                        <h2 className="text-sm font-medium text-zinc-400 mb-4">Change Plan</h2>
+
+                        {successMsg && (
+                            <div className="mb-4 px-4 py-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-sm text-emerald-400">
+                                {successMsg}
+                            </div>
+                        )}
+                        {changePlan.error && (
+                            <div className="mb-4 px-4 py-2.5 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
+                                {changePlan.error}
+                            </div>
+                        )}
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            {Object.entries(PLAN_CONFIG).map(([key, plan]) => (
+                                <button
+                                    key={key}
+                                    onClick={() => handlePlanChange(key)}
+                                    disabled={changePlan.pending}
+                                    className={`p-3 rounded-lg border text-left transition-all ${
+                                        activePlan === key
+                                            ? `${plan.bg} ${plan.border} ring-1 ${plan.ring}`
+                                            : 'border-white/5 hover:border-white/10 hover:bg-white/[0.02]'
+                                    } ${changePlan.pending ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    <p className={`text-sm font-medium ${activePlan === key ? plan.text : 'text-zinc-300'}`}>
+                                        {plan.label}
+                                    </p>
+                                    <p className="text-xs text-zinc-500 mt-0.5">{plan.price}</p>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Activity Timeline */}
+                    <div className="bg-[#111318] border border-white/5 rounded-xl p-6">
+                        <h2 className="text-sm font-medium text-zinc-400 mb-4">Activity History</h2>
+
+                        {activity.length > 0 ? (
+                            <div className="space-y-4">
+                                {activity.map(event => {
+                                    const style = EVENT_ICONS[event.event_type] || EVENT_ICONS.signup;
+                                    return (
+                                        <div key={event.id} className="flex items-start gap-3">
+                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${style.bg} ${style.text}`}>
+                                                {style.icon}
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-sm text-zinc-200">{event.description}</p>
+                                                <p className="text-xs text-zinc-600 mt-0.5">{formatDate(event.created_at)}</p>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <p className="text-sm text-zinc-500">No activity yet.</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
