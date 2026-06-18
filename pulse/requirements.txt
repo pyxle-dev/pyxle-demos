@@ -1,0 +1,9 @@
+# Pulse runs on Pyxle plus the extras it showcases:
+#   pyxle-db    — the data layer (request.state.db via the plugin)
+#   pyxle-auth  — responder sign-in (gates posting incident updates)
+#   pydantic    — typed @action body validation
+# Install with:  pip install pyxle-framework pyxle-db pyxle-auth pydantic
+pyxle-framework
+pyxle-db
+pyxle-auth
+pydantic

@@ -1,0 +1,341 @@
+import logging
+
+from pydantic import BaseModel, Field
+
+# This page has no @server loader, so `pyxle build --static` pre-renders it to
+# HTML at build time and `pyxle serve` warms the page cache with it — the fastest
+# a page can be. (It is intentionally NOT runtime-cached: it hosts a per-user
+# CSRF <Form>, and a shared cache can't carry a per-user token — see the / page
+# for runtime ISR caching instead.)
+
+
+class Subscribe(BaseModel):
+    """The subscribe <Form> body. Pydantic enforces length; the email *shape* is
+    checked in the action with a hand-rolled ValidationActionError so the user
+    gets a clean message (not a raw regex). Both surface as a 422 the Form shows
+    inline — the same per-field path as /report."""
+
+    email: str = Field(min_length=3, max_length=160)
+
+
+@action
+async def subscribe(request, body: Subscribe):
+    import re
+
+    from db import add_subscriber
+
+    email = body.email.strip().lower()
+    # A custom check raising ValidationActionError (auto-injected in .pyxl) — the
+    # message is exactly what the Form renders under the field.
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        # Empty top-level message: the per-field error carries the text, so the
+        # Form's built-in form-level alert stays quiet and we render our own
+        # on-theme message under the input.
+        raise ValidationActionError(message="", fields={"email": ["Enter a valid email address."]})
+
+    added = await add_subscriber(email)
+    if added:
+        # Confirmation goes out after the response — a background task.
+        request.state.background.add_task(_send_confirmation, email)
+    return {"email": email, "new": added}
+
+
+def _send_confirmation(email: str) -> None:
+    logging.getLogger("pulse").info("subscribe: confirmation queued for %s", email)
+
+
+import React, { useState } from 'react';
+import { Head, Link, Image, Form } from 'pyxle/client';
+import { MonoLabel, FeatureTag, Card } from './components/ui.jsx';
+
+export const slots = {};
+export const createSlots = () => slots;
+
+/* ── The feature map: every Pyxle capability and where Pulse shows it. ── */
+const GROUPS = [
+    {
+        title: 'Server',
+        accent: 'text-emerald-400',
+        items: [
+            ['File-based routing', 'Static, dynamic [id], nested', '/incidents/[id]'],
+            ['@server loaders', 'Async data, colocated in the page', 'every page'],
+            ['ISR caching', '{ data, revalidate } envelope', '/ status'],
+            ['Static generation', 'No loader · pyxle build --static', 'this page'],
+            ['@action + Pydantic', 'Typed body, 422 field errors', '/report'],
+            ['Background tasks', 'Work after the response', '/report · subscribe'],
+            ['error.pyxl + LoaderError', 'Status-aware boundary', 'unknown incident'],
+        ],
+    },
+    {
+        title: 'Realtime',
+        accent: 'text-signal-400',
+        items: [
+            ['WebSockets', 'websocket(ws) in the page file', 'incident war room'],
+            ['pyxle.realtime', 'channel() pub/sub broadcast', 'live timeline'],
+            ['useWebSocket', 'status · send · lastMessage', 'live room'],
+            ['Streaming SSR', 'Shell-first · loading.pyxl', '/incidents/*'],
+        ],
+    },
+    {
+        title: 'Client',
+        accent: 'text-sky-400',
+        items: [
+            ['<Image>', 'CLS-safe, lazy, priority', 'this page'],
+            ['<Script>', 'Self-hosted, afterInteractive', 'keyboard shortcuts'],
+            ['<Form>', 'Progressive enhancement', 'subscribe below'],
+            ['useAction', 'pending · error · fields', '/report'],
+            ['<Head> / <Link> / navigate', 'Per-page meta · SPA nav', 'everywhere'],
+            ['<ClientOnly>', 'Hydration-safe relative time', 'timestamps'],
+        ],
+    },
+    {
+        title: 'Platform',
+        accent: 'text-amber-400',
+        items: [
+            ['pyxle-auth', 'useAuth · session · responder sign-in', '/responders'],
+            ['pyxle-db', 'Migrations · transactions', 'data layer'],
+            ['Observability', 'request-id · Prometheus metrics', '/api/__pulse/metrics'],
+            ['Rate limiting', 'Token bucket, config-driven', '600 / min'],
+            ['Custom middleware', 'Server-Timing header', 'every response'],
+            ['API routes', 'pages/api/*.py', '/api/healthz'],
+        ],
+    },
+];
+
+/* Real source from the demo, revealed on demand — the "it's just Python" pitch. */
+const SOURCES = [
+    {
+        file: 'pages/index.pyxl',
+        caption: 'The status page is an ISR loader — cached HTML, refreshed every 10 seconds.',
+        code: `@server
+async def load(request):
+    return {
+        "data": {
+            "services": await list_services(),
+            "overall": await overall_status(),
+            "active": await list_incidents(active_only=True),
+        },
+        "revalidate": 10,   # serve cached HTML, refresh in the background
+    }`,
+    },
+    {
+        file: 'pages/report.pyxl',
+        caption: 'A validated mutation: Pydantic guards the body, then a write-through + a background job.',
+        code: `class NewIncident(BaseModel):
+    title: str = Field(min_length=6, max_length=120)
+    severity: Literal["minor", "major", "critical", "maintenance"]
+    summary: str = Field(min_length=12, max_length=400)
+
+@action
+async def open_incident(request, body: NewIncident):
+    slug = await create_incident(body.title, body.severity, ...)
+    await cache.invalidate("/")                       # refresh the ISR homepage
+    request.state.background.add_task(notify, slug)   # runs after the response
+    return {"slug": slug}`,
+    },
+    {
+        file: 'pages/incidents/[id].pyxl',
+        caption: 'The same file that renders the page serves its WebSocket. One channel, every tab.',
+        code: `async def websocket(ws):
+    await ws.accept()
+    slug = ws.path_params["id"]
+    async with channel(ws, f"incident:{slug}") as room:
+        async for raw in ws.iter_text():
+            update = await add_update(...)            # persist
+            await room.publish({"type": "update",     # broadcast to everyone
+                                "update": update})`,
+    },
+];
+
+function ViewSource({ file, caption, code }) {
+    const [open, setOpen] = useState(false);
+    return (
+        <Card className="overflow-hidden">
+            <button
+                type="button"
+                onClick={() => setOpen((o) => !o)}
+                aria-expanded={open}
+                className="focus-ring flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left transition-colors hover:bg-white/[0.02]"
+            >
+                <span className="min-w-0">
+                    <MonoLabel>{file}</MonoLabel>
+                    <span className="mt-1 block truncate text-sm text-zinc-400">{caption}</span>
+                </span>
+                <span className="shrink-0 font-mono text-[11px] text-signal-400">{open ? 'hide source' : 'view source'}</span>
+            </button>
+            {open && (
+                <pre className="overflow-x-auto border-t border-white/[0.06] bg-ink px-5 py-4 text-[12.5px] leading-relaxed text-zinc-300">
+                    <code>{code}</code>
+                </pre>
+            )}
+        </Card>
+    );
+}
+
+function SubscribeForm() {
+    const [result, setResult] = useState(null);
+    const [errors, setErrors] = useState({});
+
+    if (result) {
+        return (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3 text-sm text-emerald-200">
+                {result.new
+                    ? <>Subscribed <span className="font-mono text-emerald-300">{result.email}</span> — a confirmation is on its way.</>
+                    : <><span className="font-mono text-emerald-300">{result.email}</span> is already on the list.</>}
+            </div>
+        );
+    }
+
+    return (
+        <Form
+            action="subscribe"
+            onSuccess={(data) => setResult(data)}
+            onError={(message, fields) => setErrors(fields || {})}
+            className="flex flex-col gap-2 sm:flex-row"
+        >
+            <div className="flex-1">
+                <input
+                    name="email"
+                    type="email"
+                    placeholder="you@company.com"
+                    aria-label="Email address"
+                    className="focus-ring w-full rounded-lg border border-white/10 bg-ink px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600"
+                />
+                {errors.email && <p className="mt-1.5 font-mono text-[11px] text-red-400">{errors.email[0]}</p>}
+            </div>
+            <button
+                type="submit"
+                className="focus-ring rounded-lg bg-gradient-to-r from-signal-400 to-signal-600 px-5 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90"
+            >
+                Notify me
+            </button>
+        </Form>
+    );
+}
+
+export default function AboutPage() {
+    return (
+        <>
+            <Head>
+                <title>How it works — Pulse</title>
+                <meta name="description" content="Pulse is a status page that exercises every Pyxle feature — routing, ISR, WebSockets, Pydantic actions, background jobs, and more. Here's the map." />
+                <meta property="og:title" content="Pulse — how it works" />
+                <meta property="og:description" content="One status page, every Pyxle feature." />
+                <meta property="og:image" content="/visual/og.svg" />
+                <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+            </Head>
+
+            {/* ── Hero ── */}
+            <section className="pt-10 sm:pt-14">
+                <div className="flex flex-wrap items-center gap-2">
+                    <MonoLabel>How it works</MonoLabel>
+                    <FeatureTag>static page</FeatureTag>
+                    <FeatureTag>&lt;Image&gt;</FeatureTag>
+                </div>
+                <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+                    One file. The whole stack.
+                </h1>
+                <p className="mt-4 max-w-2xl text-lg leading-relaxed text-zinc-400">
+                    Pulse is a real status page built to exercise <span className="text-zinc-200">every</span> Pyxle
+                    feature — Python loaders and React UI in the same <code className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[13px] text-signal-400">.pyxl</code> file,
+                    server-rendered and hydrated. This page itself is statically generated.
+                </p>
+                <div className="mt-8 overflow-hidden rounded-2xl border border-white/[0.06]">
+                    <Image
+                        src="/visual/signal-wave.svg"
+                        alt="A live signal waveform"
+                        width={1200}
+                        height={360}
+                        priority
+                        className="w-full"
+                    />
+                </div>
+            </section>
+
+            {/* ── Feature map ── */}
+            <section className="mt-14">
+                <MonoLabel>The feature map</MonoLabel>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">Everything Pulse demonstrates</h2>
+                <div className="mt-6 grid gap-5 lg:grid-cols-2">
+                    {GROUPS.map((group) => (
+                        <Card key={group.title} className="p-5">
+                            <p className={`font-mono text-[11px] font-semibold uppercase tracking-[0.18em] ${group.accent}`}>{group.title}</p>
+                            <ul className="mt-3 divide-y divide-white/[0.05]">
+                                {group.items.map(([name, desc, where]) => (
+                                    <li key={name} className="flex items-baseline justify-between gap-4 py-2.5">
+                                        <div className="min-w-0">
+                                            <p className="font-medium text-white">{name}</p>
+                                            <p className="text-sm text-zinc-500">{desc}</p>
+                                        </div>
+                                        <span className="shrink-0 font-mono text-[10.5px] text-zinc-600">{where}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </Card>
+                    ))}
+                </div>
+            </section>
+
+            {/* ── Request flow diagram ── */}
+            <section className="mt-14">
+                <MonoLabel>The request flow</MonoLabel>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">How a request travels</h2>
+                <p className="mt-3 max-w-2xl text-zinc-400">
+                    Every request enters the same middleware stack, then fans out into one of three lanes —
+                    a cached page render, a validated action, or a realtime socket.
+                </p>
+                <div className="mt-6 overflow-hidden rounded-2xl border border-white/[0.06] bg-panel/40 p-2 sm:p-4">
+                    <Image
+                        src="/visual/how-it-works.svg"
+                        alt="Diagram: a Pulse request flows through the Starlette middleware stack, then into the page, action, or WebSocket lane."
+                        width={1200}
+                        height={720}
+                        className="w-full"
+                    />
+                </div>
+            </section>
+
+            {/* ── View source ── */}
+            <section className="mt-14">
+                <MonoLabel>Read the source</MonoLabel>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">It really is just Python</h2>
+                <p className="mt-3 max-w-2xl text-zinc-400">
+                    No magic. Open any surface in the demo and the code is exactly what you'd expect.
+                </p>
+                <div className="mt-6 space-y-3">
+                    {SOURCES.map((s) => <ViewSource key={s.file} {...s} />)}
+                </div>
+            </section>
+
+            {/* ── Subscribe (Form showcase) ── */}
+            <section className="mt-14">
+                <Card className="p-6 sm:p-8">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <MonoLabel>Stay in the loop</MonoLabel>
+                        <FeatureTag>&lt;Form&gt;</FeatureTag>
+                        <FeatureTag>Pydantic</FeatureTag>
+                        <FeatureTag>background task</FeatureTag>
+                    </div>
+                    <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Get notified about incidents</h2>
+                    <p className="mt-2 max-w-2xl text-zinc-400">
+                        This form posts to a Pydantic-validated <code className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[13px] text-signal-400">@action</code> and
+                        works even without JavaScript. A bad address comes back inline; a good one queues a confirmation.
+                    </p>
+                    <div className="mt-5 max-w-lg">
+                        <SubscribeForm />
+                    </div>
+                </Card>
+            </section>
+
+            {/* ── Footer CTA ── */}
+            <section className="mt-14 flex flex-wrap items-center gap-3">
+                <Link href="/" className="focus-ring rounded-lg bg-gradient-to-r from-signal-400 to-signal-600 px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90">
+                    See it live
+                </Link>
+                <a href="https://pyxle.dev" target="_blank" rel="noreferrer" className="focus-ring rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-300 transition-colors hover:text-white">
+                    Read the docs ↗
+                </a>
+            </section>
+        </>
+    );
+}

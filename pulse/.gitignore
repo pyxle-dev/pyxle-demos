@@ -1,0 +1,17 @@
+# Pyxle build output
+.pyxle-build/
+dist/
+
+# Runtime SQLite database — seeded on first run, never committed
+data/
+
+# Python / tooling
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node (a dev symlink to a shared install — never committed)
+node_modules
+
+# Generated Tailwind output (Vite/PostCSS compiles pages/styles/tailwind.css)
+public/styles/

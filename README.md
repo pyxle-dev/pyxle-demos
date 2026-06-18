@@ -36,6 +36,16 @@ A dark gallery of spirographs, rose curves, mandalas, star polygons, Lissajous c
 
 ---
 
+### [Pulse](pulse/) — a full-stack reference app
+
+> **Live:** [pulse.pyxle.app](https://pulse.pyxle.app)
+
+**Pulse** is a fictional service-status page built to exercise *every* Pyxle feature in one real app — a status page, a live incident war room, a validated report form, and a "how it works" tour. Python loaders and React UI in the same `.pyxl` file, server-rendered and hydrated.
+
+**Pyxle features shown:** file-based routing (static + dynamic), `@server` loaders, **ISR caching** & **static generation**, `@action` + **Pydantic** validation, `useAction`, `<Form>`, **WebSockets** (`pyxle.realtime` + `useWebSocket`), **background tasks**, **pyxle-db** (migrations + transactions), `error.pyxl`/`not-found.pyxl`/`loading.pyxl` boundaries, **Slots**, `<Image>`, `<Script>`, `<Head>`, `<Link>`, `navigate()`, `usePathname()`, `<ClientOnly>`, **observability** (Prometheus), **rate limiting**, and a custom **middleware**.
+
+---
+
 ## Run Locally
 
 Each demo is a standalone Pyxle app. Pick one and run:
@@ -45,7 +55,7 @@ Each demo is a standalone Pyxle app. Pick one and run:
 pip install pyxle-framework
 
 # Pick a demo
-cd flux    # or: cd chroma / cd glyph
+cd flux    # or: cd chroma / cd glyph / cd pulse
 
 # Install dependencies and start
 npm install
@@ -82,7 +92,7 @@ export default function Page({ data }) {
 ```
 
 - **Website:** [pyxle.dev](https://pyxle.dev)
-- **Framework:** [github.com/pyxle-framework/pyxle](https://github.com/pyxle-framework/pyxle)
+- **Framework:** [github.com/pyxle-dev/pyxle](https://github.com/pyxle-dev/pyxle)
 - **Docs:** [pyxle.dev/docs](https://pyxle.dev/docs)
 
 ## License

@@ -11,3 +11,10 @@ data/
 .env.local
 .claude/
 .DS_Store
+
+# Archived original kit demo (stashed for reference)
+_kit-legacy/
+
+# Internal QA / working reports — kept locally, not shipped in the public demo
+TEST_REPORT_*.md
+DEPLOYMENT.md

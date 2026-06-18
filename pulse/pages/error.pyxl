@@ -1,0 +1,44 @@
+import React from 'react';
+import { Head, Link } from 'pyxle/client';
+
+export const slots = {};
+export const createSlots = () => slots;
+
+/* error.pyxl — the nearest error boundary. Pyxle renders it on the server when
+   a loader or render throws (e.g. a LoaderError), and the same file is the
+   client React error boundary after hydration. */
+export default function ErrorPage({ error }) {
+    const e = error || {};
+    const status = e.statusCode || 500;
+    const reload = () => { if (typeof window !== 'undefined') window.location.reload(); };
+
+    return (
+        <>
+            <Head>
+                <title>{status} — Pulse</title>
+                <meta name="robots" content="noindex" />
+                <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+            </Head>
+            <section className="flex min-h-[60vh] flex-col items-center justify-center py-20 text-center">
+                <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-red-400">Error · {status}</p>
+                <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+                    {status === 404 ? 'That page slipped the feed.' : 'Something went sideways.'}
+                </h1>
+                <p className="mt-3 max-w-md text-zinc-400">
+                    {e.message || 'An unexpected error occurred while loading this page.'}
+                </p>
+                <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                    <Link href="/" className="focus-ring rounded-lg bg-gradient-to-r from-signal-400 to-signal-600 px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90">
+                        Back to status
+                    </Link>
+                    <button type="button" onClick={reload} className="focus-ring rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-300 transition-colors hover:text-white">
+                        Reload
+                    </button>
+                </div>
+                <p className="mt-10 font-mono text-[11px] text-zinc-600">
+                    rendered by <span className="text-zinc-400">error.pyxl</span> — server and client error boundary
+                </p>
+            </section>
+        </>
+    );
+}

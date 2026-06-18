@@ -1,0 +1,40 @@
+import React from 'react';
+
+export const slots = {};
+export const createSlots = () => slots;
+
+/* loading.pyxl — the route-level loading state for /incidents/*. Pyxle wraps
+   the route in <Suspense fallback={<Loading/>}> on the server and applies the
+   same fallback on the client, so navigating to an incident shows this skeleton
+   the instant the link is clicked, before the loader resolves. */
+function Bar({ w = 'w-full', h = 'h-4' }) {
+    return <div className={`${w} ${h} animate-pulse rounded bg-white/[0.06]`} />;
+}
+
+export default function IncidentsLoading() {
+    return (
+        <div className="pt-8" aria-busy="true" aria-label="Loading">
+            <div className="flex gap-2">
+                <Bar w="w-16" h="h-6" />
+                <Bar w="w-24" h="h-6" />
+            </div>
+            <div className="mt-4"><Bar w="w-2/3" h="h-9" /></div>
+            <div className="mt-4 space-y-2">
+                <Bar w="w-full" />
+                <Bar w="w-1/2" />
+            </div>
+            <div className="mt-8 rounded-2xl border border-white/[0.06] bg-panel/70 p-5">
+                <Bar w="w-28" h="h-5" />
+                <div className="mt-5 space-y-5">
+                    {[0, 1, 2].map((i) => (
+                        <div key={i} className="space-y-2">
+                            <Bar w="w-40" h="h-4" />
+                            <Bar w="w-full" />
+                            <Bar w="w-4/5" />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}

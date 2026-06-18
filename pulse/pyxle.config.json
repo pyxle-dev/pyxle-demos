@@ -1,0 +1,27 @@
+{
+  "plugins": [
+    {
+      "name": "pyxle-db",
+      "settings": {
+        "path": "data/pulse.db",
+        "migrationsDir": "migrations"
+      }
+    },
+    {
+      "name": "pyxle-auth",
+      "settings": { "strict": false }
+    }
+  ],
+  "middleware": ["middleware:ServerTimingMiddleware"],
+  "rateLimit": {
+    "requests": 600,
+    "window": 60,
+    "exemptPaths": ["/api/healthz"]
+  },
+  "observability": {
+    "requestId": true,
+    "timing": true,
+    "metricsEndpoint": true,
+    "metricsEndpointPath": "/api/__pulse/metrics"
+  }
+}

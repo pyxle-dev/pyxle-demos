@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────────────────────── */
+@layer base {
+    html {
+        scroll-behavior: smooth;
+    }
+    body {
+        @apply bg-ink text-zinc-300 antialiased;
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    ::selection {
+        background: rgba(34, 211, 238, 0.22);
+        color: #fff;
+    }
+    /* Thin, on-brand scrollbar */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+    }
+    *::-webkit-scrollbar { width: 9px; height: 9px; }
+    *::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 9999px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+    }
+}
+
+@layer components {
+    /* Accessible focus ring used across interactive elements */
+    .focus-ring {
+        @apply outline-none focus-visible:ring-2 focus-visible:ring-signal-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink;
+    }
+    /* A live heartbeat dot: a solid core with an expanding ring behind it. */
+    .pulse-dot {
+        @apply relative inline-flex h-2.5 w-2.5 items-center justify-center;
+    }
+    .pulse-dot::before {
+        content: "";
+        @apply absolute inline-flex h-full w-full rounded-full;
+        background: currentColor;
+        animation: pulsering 1.8s ease-out infinite;
+    }
+    .pulse-dot::after {
+        content: "";
+        @apply relative inline-flex h-2.5 w-2.5 rounded-full;
+        background: currentColor;
+    }
+}
+
+/* ── Syntax-highlight tokens (shared with pyxle.dev's docs) ─────
+   Emitted by pages/components/code-highlighter.jsx so the "View
+   source" panels read exactly like the documentation. */
+.sh-kw   { color: #c084fc; }
+.sh-str  { color: #6ee7b7; }
+.sh-cmt  { color: #a1a1aa; font-style: italic; }
+.sh-dec  { color: #facc15; }
+.sh-fn   { color: #60a5fa; }
+.sh-tag  { color: #71717a; }
+.sh-comp { color: #22d3ee; }
+.sh-elem { color: #f87171; }
+.sh-attr { color: #fde047; }
+.sh-brc  { color: #facc15; }
+.sh-prop { color: #22d3ee; }
+.sh-num  { color: #fb923c; }
+.sh-cmd  { color: #4ade80; }
+.sh-flg  { color: #22d3ee; }
+.sh-pl   { color: #d4d4d8; }
+
+@media (prefers-reduced-motion: reduce) {
+    .pulse-dot::before { animation: none; }
+    *, *::before, *::after { animation-duration: 0.001ms !important; }
+}
