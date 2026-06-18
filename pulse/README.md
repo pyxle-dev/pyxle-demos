@@ -28,6 +28,20 @@ pyxle build --static && pyxle serve       # production: prerender + serve
 pyxle openapi --title "Pulse API"         # OpenAPI 3.1 from the @action models
 ```
 
+### Production environment
+
+pyxle-auth runs in its **strict** posture by default (Secure cookies, argon
+floors, a real signing secret required) — local dev relaxes it via the
+committed `.env.development` (`PYXLE_AUTH_STRICT=false`). In production set on
+the host:
+
+- `PYXLE_SECRET_KEY` — **required** in strict mode; signs the session/state
+  cookies. Boot aborts without it.
+
+The Prometheus metrics endpoint at `/api/__pulse/metrics` is intentionally open
+(this is a showcase); add `observability.metricsEndpointToken` to bearer-guard
+it if deployed somewhere it shouldn't be public.
+
 ---
 
 ## What it demonstrates
