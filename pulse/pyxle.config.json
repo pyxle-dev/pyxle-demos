@@ -8,8 +8,7 @@
       }
     },
     {
-      "name": "pyxle-auth",
-      "settings": { "strict": false }
+      "name": "pyxle-auth"
     }
   ],
   "middleware": ["middleware:ServerTimingMiddleware"],
