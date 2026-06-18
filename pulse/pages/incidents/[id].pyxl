@@ -1,0 +1,313 @@
+@server
+async def load(request):
+    # A dynamic route ([id].pyxl). A missing incident raises LoaderError, which
+    # the nearest error.pyxl renders with the right status — no manual 404 wiring.
+    from pyxle.runtime import LoaderError
+
+    from db import get_incident
+
+    slug = request.path_params["id"]
+    incident = await get_incident(slug)
+    if incident is None:
+        raise LoaderError(f"No incident named “{slug}”.", status_code=404)
+    return incident
+
+
+# Per-channel watcher count. In-process is accurate for the single-worker
+# demo; a multi-worker deploy would track presence in Redis (the same caveat
+# the WebSocket broker carries — documented in the README).
+_PRESENCE: dict[str, int] = {}
+
+# The only statuses a responder may move an incident to (server-side allowlist —
+# never trust the client's status string).
+_UPDATE_STATUSES = {"investigating", "identified", "monitoring", "resolved"}
+
+
+async def websocket(ws):
+    # The SAME file that renders the page also serves a WebSocket at its path.
+    # Everyone viewing this incident joins one channel; an update typed in one
+    # tab is persisted and broadcast to every other tab in real time.
+    #
+    # Auth: anyone may connect and watch. Posting an official "update" requires a
+    # signed-in responder — enforced HERE on the server (no middleware runs for a
+    # WebSocket), so a forged client can't post. The author is taken from the
+    # authenticated session, never from the client payload.
+    import json
+
+    from pyxle.realtime import authenticate_websocket, channel, origin_allowed
+
+    from db import add_update, get_incident
+
+    slug = ws.path_params["id"]
+    incident = await get_incident(slug)
+    if incident is None:
+        await ws.close(code=4404)  # reject the handshake for a missing incident
+        return
+    # A WS handshake bypasses CORS/CSRF, so the Origin header is the only
+    # cross-site defense. Allow ONLY same-origin connections (Origin matching our
+    # own host) so a malicious page can't ride a signed-in responder's cookie to
+    # post on their behalf — cross-site WebSocket hijacking. (Non-browser clients
+    # send no Origin and are allowed; the cookie-riding attack is browser-only.)
+    host = ws.headers.get("host", "")
+    if host and not origin_allowed(ws, [f"https://{host}", f"http://{host}"]):
+        await ws.close(code=4403)
+        return
+    await ws.accept()
+    responder = await authenticate_websocket(ws)  # the pyxle-auth user, or None
+    incident_id = incident["id"]
+    chan = f"incident:{slug}"
+
+    async with channel(ws, chan) as room:
+        _PRESENCE[chan] = _PRESENCE.get(chan, 0) + 1
+        await room.publish({"type": "presence", "count": _PRESENCE[chan]})
+        try:
+            async for raw in ws.iter_text():
+                try:
+                    msg = json.loads(raw)
+                except (ValueError, TypeError):
+                    continue
+                kind = msg.get("type")
+                if kind == "update":
+                    if responder is None:
+                        # Not signed in — refuse the post (only this socket hears it).
+                        await ws.send_json({"type": "denied", "message": "Sign in as a responder to post updates."})
+                        continue
+                    body = (msg.get("body") or "").strip()
+                    if not body:
+                        continue
+                    status = msg.get("status") or "monitoring"
+                    if status not in _UPDATE_STATUSES:
+                        status = "monitoring"  # never trust a client-supplied status
+                    # Author is the authenticated responder — never the client payload.
+                    author = responder.email
+                    row = await add_update(incident_id, status, body[:1000], author)
+                    await room.publish({"type": "update", "update": row})
+                # "update" is the only message a client sends; we deliberately do
+                # NOT accept or rebroadcast arbitrary client-authored message types.
+        finally:
+            _PRESENCE[chan] = max(0, _PRESENCE.get(chan, 1) - 1)
+            await room.publish({"type": "presence", "count": _PRESENCE[chan]})
+
+
+import React, { Suspense, useEffect, useRef, useState } from 'react';
+import { Head, Link, ClientOnly, useWebSocket, useAuth } from 'pyxle/client';
+import {
+    LivePulse, StatusChip, SeverityChip, Card, MonoLabel, RelativeTime,
+    FeatureTag, INCIDENT_STATUS_LABEL,
+} from '../components/ui.jsx';
+import ImpactPanel from './_ImpactPanel.jsx';
+
+// The impact panel is wrapped in <Suspense> and deliberately stalls ~2.5s on the
+// server (see _ImpactPanel.jsx). renderToPipeableStream flushes this page's shell
+// + the skeleton immediately, then streams the panel in when it resolves. This
+// route also ships a loading.pyxl as the route-level streaming fallback.
+function ImpactSkeleton() {
+    return (
+        <Card className="p-5">
+            <div className="flex items-center gap-2">
+                <div className="h-3 w-28 animate-pulse rounded bg-white/[0.06]" />
+                <span className="font-mono text-[10px] text-zinc-600">streaming…</span>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="h-16 animate-pulse rounded-xl bg-white/[0.04]" />
+                ))}
+            </div>
+        </Card>
+    );
+}
+
+// Fill the layout's <Slot name="actions" /> with a back link (Slots feature).
+export const slots = {
+    actions: () => (
+        <Link href="/incidents" className="focus-ring rounded-lg border border-white/10 px-3 py-1.5 font-mono text-[12px] text-zinc-400 transition-colors hover:text-white">
+            ← all incidents
+        </Link>
+    ),
+};
+export const createSlots = () => slots;
+
+const STATUS_OPTIONS = ['investigating', 'identified', 'monitoring', 'resolved'];
+
+function TimelineEntry({ u, live }) {
+    return (
+        <li className={`relative pl-6 ${live ? 'animate-streamin' : ''}`}>
+            <span className="absolute left-0 top-1.5 flex h-3 w-3 items-center justify-center">
+                <span className="h-2 w-2 rounded-full bg-signal-500 ring-4 ring-signal-500/15" />
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+                <StatusChip status={u.status === 'resolved' ? 'operational' : (u.status === 'investigating' ? 'major' : 'degraded')} label={INCIDENT_STATUS_LABEL[u.status] || u.status} />
+                <span className="font-mono text-[11px] text-zinc-500">
+                    {u.author} · <RelativeTime iso={u.created_at} />
+                </span>
+                {live && <FeatureTag>live</FeatureTag>}
+            </div>
+            <p className="mt-2 text-[15px] leading-relaxed text-zinc-300">{u.body}</p>
+        </li>
+    );
+}
+
+/* The realtime war room: a connection, a live-updating timeline, a composer
+   that broadcasts to everyone, and a presence count. */
+function LiveRoom({ slug, incident, initialUpdates }) {
+    const { status, send, lastMessage } = useWebSocket(`/incidents/${slug}`);
+    const { isAuthenticated, user } = useAuth();
+    const [updates, setUpdates] = useState(initialUpdates);
+    const [liveIds, setLiveIds] = useState(() => new Set());
+    const [present, setPresent] = useState(1);
+    const [body, setBody] = useState('');
+    const [denied, setDenied] = useState(null);
+    const [newStatus, setNewStatus] = useState(incident.status === 'resolved' ? 'monitoring' : incident.status);
+
+    useEffect(() => {
+        if (!lastMessage || typeof lastMessage !== 'object') return;
+        const m = lastMessage;
+        if (m.type === 'update' && m.update) {
+            setUpdates((prev) => (prev.some((u) => u.id === m.update.id) ? prev : [m.update, ...prev]));
+            setLiveIds((prev) => new Set(prev).add(m.update.id));
+        } else if (m.type === 'presence' && typeof m.count === 'number') {
+            setPresent(Math.max(1, m.count));
+        } else if (m.type === 'denied') {
+            setDenied(m.message || 'Sign in to post updates.');
+        }
+    }, [lastMessage]);
+
+    const postUpdate = (e) => {
+        e.preventDefault();
+        const text = body.trim();
+        if (!text || status !== 'open') return;
+        // The server takes the author from the authenticated session, so we only
+        // send the body + status — never an author the client could forge.
+        send({ type: 'update', body: text, status: newStatus });
+        setBody('');
+    };
+
+    const dotStatus = status === 'open' ? 'operational' : status === 'connecting' ? 'degraded' : 'major';
+    const signInHref = `/responders?next=${encodeURIComponent(`/incidents/${slug}`)}`;
+
+    return (
+        <Card className="overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-5 py-3.5">
+                <div className="flex items-center gap-2.5">
+                    <LivePulse status={dotStatus} />
+                    <span className="text-sm font-medium text-white">Live room</span>
+                    <FeatureTag>WebSockets · pyxle.realtime</FeatureTag>
+                </div>
+                <span className="font-mono text-[11px] text-zinc-500">
+                    {status === 'open' ? `${present} watching` : status}
+                </span>
+            </div>
+
+            {/* Composer — posting requires a signed-in responder (pyxle-auth).
+                Anyone can still watch; only responders can write to the timeline. */}
+            {isAuthenticated ? (
+                <form onSubmit={postUpdate} className="border-b border-white/[0.06] p-5">
+                    <div className="mb-2 flex items-center gap-2">
+                        <MonoLabel>Post an update</MonoLabel>
+                        <select
+                            value={newStatus}
+                            onChange={(e) => setNewStatus(e.target.value)}
+                            className="focus-ring rounded-md border border-white/10 bg-ink px-2 py-1 font-mono text-[11px] text-zinc-300"
+                        >
+                            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                    </div>
+                    <textarea
+                        value={body}
+                        onChange={(e) => setBody(e.target.value)}
+                        placeholder="What's the latest? This broadcasts to every open tab and is saved to the timeline."
+                        rows={2}
+                        className="focus-ring w-full resize-none rounded-lg border border-white/10 bg-ink px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600"
+                    />
+                    {denied && <p className="mt-2 text-[12px] text-red-400" role="alert">{denied}</p>}
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-mono text-[11px] text-zinc-500">posting as <span className="text-zinc-300">{user?.email}</span></span>
+                        <button
+                            type="submit"
+                            disabled={status !== 'open' || !body.trim()}
+                            className="focus-ring rounded-lg bg-gradient-to-r from-signal-400 to-signal-600 px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            Post update
+                        </button>
+                    </div>
+                    <p className="mt-2 font-mono text-[10px] text-zinc-600">
+                        Tip — open this page in a second tab and post; it appears here instantly.
+                    </p>
+                </form>
+            ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] p-5">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <MonoLabel>Post an update</MonoLabel>
+                            <FeatureTag>pyxle-auth</FeatureTag>
+                        </div>
+                        <p className="mt-2 text-sm text-zinc-400">Watching is open to everyone. Posting an official update needs a responder sign-in.</p>
+                    </div>
+                    <Link
+                        href={signInHref}
+                        className="focus-ring shrink-0 rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-200 transition-colors hover:border-signal-400/40 hover:text-white"
+                    >
+                        Sign in to post →
+                    </Link>
+                </div>
+            )}
+
+            {/* Timeline */}
+            <div className="p-5">
+                <MonoLabel className="mb-4">Timeline</MonoLabel>
+                <ul className="space-y-5 border-l border-white/[0.07] pl-1">
+                    {updates.map((u) => (
+                        <TimelineEntry key={u.id} u={u} live={liveIds.has(u.id)} />
+                    ))}
+                </ul>
+            </div>
+        </Card>
+    );
+}
+
+export default function IncidentPage({ data }) {
+    const incident = data;
+    const resolved = incident.status === 'resolved';
+
+    return (
+        <>
+            <Head>
+                <title>{incident.title} — Pulse</title>
+                <meta name="description" content={incident.summary} />
+                <meta property="og:title" content={incident.title} />
+                <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+            </Head>
+
+            <article className="pt-8">
+                <div className="flex flex-wrap items-center gap-2">
+                    <SeverityChip severity={incident.severity} />
+                    <StatusChip
+                        status={resolved ? 'operational' : 'degraded'}
+                        label={INCIDENT_STATUS_LABEL[incident.status] || incident.status}
+                    />
+                    {incident.service_name && (
+                        <span className="rounded bg-white/[0.04] px-2 py-0.5 font-mono text-[11px] text-zinc-400">{incident.service_name}</span>
+                    )}
+                </div>
+                <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white sm:text-[2.2rem]">
+                    {incident.title}
+                </h1>
+                <p className="mt-3 max-w-2xl text-zinc-400">{incident.summary}</p>
+                <p className="mt-3 font-mono text-[11px] text-zinc-500">
+                    opened <RelativeTime iso={incident.created_at} />
+                    {resolved && incident.resolved_at && <> · resolved <RelativeTime iso={incident.resolved_at} /></>}
+                </p>
+
+                <div className="mt-8">
+                    <LiveRoom slug={incident.slug} incident={incident} initialUpdates={incident.updates} />
+                </div>
+
+                <div className="mt-6">
+                    <Suspense fallback={<ImpactSkeleton />}>
+                        <ImpactPanel incident={incident} />
+                    </Suspense>
+                </div>
+            </article>
+        </>
+    );
+}

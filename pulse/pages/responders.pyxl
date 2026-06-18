@@ -1,0 +1,116 @@
+# No @server loader — the pyxle-auth plugin serves the auth endpoints
+# (/auth/login, /auth/signup, /auth/me, /auth/logout) and useAuth() talks to
+# them directly. Anyone can read the status page; only signed-in responders can
+# POST incident updates (enforced in incidents/[id].pyxl's WebSocket handler).
+
+
+import React, { useState } from 'react';
+import { Head, Link, navigate, useAuth } from 'pyxle/client';
+import { Card, MonoLabel, FeatureTag } from './components/ui.jsx';
+
+export const slots = {};
+export const createSlots = () => slots;
+
+function nextTarget() {
+    if (typeof window === 'undefined') return '/incidents';
+    const n = new URLSearchParams(window.location.search).get('next');
+    // Only allow same-site relative paths.
+    return n && n.startsWith('/') && !n.startsWith('//') ? n : '/incidents';
+}
+
+export default function RespondersPage() {
+    const { user, isAuthenticated, login, signup, logout, loading, error } = useAuth();
+    const [mode, setMode] = useState('signin');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+
+    const submit = async (e) => {
+        e.preventDefault();
+        const fn = mode === 'signin' ? login : signup;
+        const res = await fn({ email, password });
+        if (res && res.ok) navigate(nextTarget());
+    };
+
+    const inputCls = 'focus-ring w-full rounded-lg border border-white/10 bg-ink px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600';
+
+    return (
+        <>
+            <Head>
+                <title>Responder sign-in — Pulse</title>
+                <meta name="robots" content="noindex" />
+                <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+            </Head>
+
+            <section className="mx-auto max-w-md pt-12 sm:pt-16">
+                <div className="flex flex-wrap items-center gap-2">
+                    <MonoLabel>Responders</MonoLabel>
+                    <FeatureTag>pyxle-auth</FeatureTag>
+                    <FeatureTag>useAuth</FeatureTag>
+                </div>
+                <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">Responder sign-in</h1>
+                <p className="mt-3 text-zinc-400">
+                    The status page is public. Signing in as a responder is what lets you
+                    <span className="text-zinc-200"> post official updates</span> to an incident's live timeline.
+                </p>
+
+                {isAuthenticated ? (
+                    <Card className="mt-7 p-6">
+                        <p className="text-sm text-zinc-400">Signed in as</p>
+                        <p className="mt-1 font-medium text-white">{user?.email}</p>
+                        <div className="mt-5 flex flex-wrap gap-3">
+                            <Link href="/incidents" className="focus-ring rounded-lg bg-gradient-to-r from-signal-400 to-signal-600 px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90">
+                                Go to incidents
+                            </Link>
+                            <button
+                                type="button"
+                                onClick={() => logout()}
+                                className="focus-ring rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-300 transition-colors hover:text-white"
+                            >
+                                Sign out
+                            </button>
+                        </div>
+                    </Card>
+                ) : (
+                    <Card className="mt-7 p-6">
+                        <div className="mb-5 inline-flex rounded-lg border border-white/10 p-0.5 text-sm">
+                            {['signin', 'signup'].map((m) => (
+                                <button
+                                    key={m}
+                                    type="button"
+                                    onClick={() => setMode(m)}
+                                    className={`focus-ring rounded-md px-3 py-1.5 transition-colors ${mode === m ? 'bg-white/[0.08] text-white' : 'text-zinc-400 hover:text-white'}`}
+                                >
+                                    {m === 'signin' ? 'Sign in' : 'Create account'}
+                                </button>
+                            ))}
+                        </div>
+
+                        <form onSubmit={submit} className="space-y-4">
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-zinc-300">Email</label>
+                                <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" className={inputCls} />
+                            </div>
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-zinc-300">Password</label>
+                                <input type="password" autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} required value={password} onChange={(e) => setPassword(e.target.value)} placeholder={mode === 'signin' ? 'Your password' : 'At least 8 characters'} className={inputCls} />
+                            </div>
+
+                            {error && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300" role="alert">{error}</p>}
+
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="focus-ring w-full rounded-lg bg-gradient-to-r from-signal-400 to-signal-600 px-5 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-50"
+                            >
+                                {loading ? 'Working…' : mode === 'signin' ? 'Sign in' : 'Create account'}
+                            </button>
+                        </form>
+                        <p className="mt-4 font-mono text-[11px] text-zinc-600">
+                            Demo only — credentials are stored locally in SQLite (argon2-hashed). Use anything.
+                        </p>
+                    </Card>
+                )}
+            </section>
+        </>
+    );
+}

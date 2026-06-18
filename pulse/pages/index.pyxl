@@ -1,0 +1,187 @@
+@server
+async def load(request):
+    # The {"data", "revalidate"} envelope opts this page into Pyxle's server
+    # render cache: in production (`pyxle serve`) the rendered HTML is served
+    # from cache and refreshed in the background every 10s (ISR). `generated_at`
+    # lets the page show how old that cached render is — refresh and watch it
+    # hold, then jump. NOTE: the page cache is OFF under `pyxle dev` (every
+    # request re-renders), so the badge below says so when running in dev.
+    from datetime import datetime, timezone
+
+    from db import list_incidents, list_services, overall_status
+
+    return {
+        "data": {
+            "services": await list_services(),
+            "overall": await overall_status(),
+            "active": await list_incidents(active_only=True, limit=5),
+            "recent": await list_incidents(limit=4),
+            "generated_at": datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
+            "dev": bool(getattr(request.app, "debug", False)),
+        },
+        "revalidate": 10,
+    }
+
+
+import React, { useEffect, useState } from 'react';
+import { Head, Link, ClientOnly } from 'pyxle/client';
+import {
+    LivePulse, StatusChip, SeverityChip, UptimeBars, Card, MonoLabel,
+    RelativeTime, FeatureTag, STATUS_COLOR,
+} from './components/ui.jsx';
+
+export const slots = {};
+export const createSlots = () => slots;
+
+/* Visualises the ISR render cache. In production the number holds within the
+   10s window (same cached HTML is served), then jumps when it revalidates. The
+   page cache is disabled under `pyxle dev` — every request re-renders — so in
+   dev the badge says "live render" rather than implying a cache that isn't on. */
+function CacheBadge({ generatedAt, dev }) {
+    const [secs, setSecs] = useState(0);
+    useEffect(() => {
+        const base = Date.parse(generatedAt.replace(' ', 'T') + 'Z');
+        const tick = () => setSecs(Math.max(0, Math.round((Date.now() - base) / 1000)));
+        tick();
+        const t = setInterval(tick, 1000);
+        return () => clearInterval(t);
+    }, [generatedAt]);
+    return (
+        <span className="font-mono text-[11px] leading-relaxed text-zinc-500">
+            <span className="mr-2 inline-block h-1.5 w-1.5 rounded-full bg-signal-400 align-middle" />
+            {dev
+                ? <>live render (dev) · ISR caching is active under <code className="text-zinc-400">pyxle serve</code></>
+                : <>cached render · {secs}s old · revalidates every 10s</>}
+        </span>
+    );
+}
+
+export default function StatusPage({ data }) {
+    const { services, overall, active, recent, generated_at, dev } = data;
+    const c = STATUS_COLOR[overall.status] || STATUS_COLOR.operational;
+
+    return (
+        <>
+            <Head>
+                <title>Pulse — Service status</title>
+                <meta name="description" content="Live status and incident history for the Pulse platform. A Pyxle demo." />
+                <meta property="og:title" content="Pulse — Service status" />
+                <meta property="og:description" content="Live status and incident history, served from an ISR cache." />
+                <meta property="og:image" content="/visual/og.svg" />
+                <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+            </Head>
+
+            {/* ── Overall status hero ── */}
+            <section className="pt-10 sm:pt-14">
+                <div className="flex flex-wrap items-center gap-2">
+                    <MonoLabel>Pulse platform</MonoLabel>
+                    <FeatureTag>ISR cache</FeatureTag>
+                    <FeatureTag>@server loader</FeatureTag>
+                    <FeatureTag>pyxle-db</FeatureTag>
+                </div>
+                <div className="mt-5 flex items-start gap-4">
+                    <LivePulse status={overall.status} className="mt-3 scale-150" />
+                    <div>
+                        <h1 className={`text-3xl font-semibold tracking-tight sm:text-[2.6rem] ${c.text}`}>
+                            {overall.label}
+                        </h1>
+                        <p className="mt-2 text-zinc-400">
+                            {overall.active_incidents > 0
+                                ? `${overall.active_incidents} active incident${overall.active_incidents > 1 ? 's' : ''} · all other systems normal`
+                                : 'Every monitored service is healthy.'}
+                        </p>
+                    </div>
+                </div>
+                <div className="mt-5">
+                    <ClientOnly fallback={<span className="font-mono text-[11px] text-zinc-600">rendered {generated_at.slice(0, 19)} UTC</span>}>
+                        <CacheBadge generatedAt={generated_at} dev={dev} />
+                    </ClientOnly>
+                </div>
+            </section>
+
+            {/* ── Active incident callout ── */}
+            {active.length > 0 && (
+                <section className="mt-8">
+                    {active.map((inc) => (
+                        <Link key={inc.id} href={`/incidents/${inc.slug}`} className="focus-ring group block">
+                            <Card className="overflow-hidden ring-1 ring-orange-500/20 transition-colors hover:bg-panel">
+                                <div className="border-l-2 border-orange-500/60 p-5 sm:p-6">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <SeverityChip severity={inc.severity} />
+                                        <StatusChip status="degraded" label={inc.status} />
+                                        <span className="font-mono text-[11px] text-zinc-500">
+                                            opened <RelativeTime iso={inc.created_at} />
+                                        </span>
+                                    </div>
+                                    <h2 className="mt-3 text-lg font-medium text-white group-hover:text-signal-400">
+                                        {inc.title}
+                                    </h2>
+                                    <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-zinc-400">{inc.summary}</p>
+                                    <p className="mt-3 inline-flex items-center gap-1 font-mono text-[11px] text-signal-400">
+                                        Open live incident room →
+                                    </p>
+                                </div>
+                            </Card>
+                        </Link>
+                    ))}
+                </section>
+            )}
+
+            {/* ── Services ── */}
+            <section className="mt-10">
+                <div className="mb-3 flex items-center justify-between">
+                    <MonoLabel>Services</MonoLabel>
+                    <span className="font-mono text-[11px] text-zinc-600">{services.length} monitored</span>
+                </div>
+                <Card>
+                    <ul className="divide-y divide-white/[0.05]">
+                        {services.map((svc) => (
+                            <li key={svc.id} className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-8">
+                                <div>
+                                    <div className="flex items-center gap-2.5">
+                                        <span className="font-medium text-white">{svc.name}</span>
+                                        <span className="rounded bg-white/[0.04] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-zinc-500">{svc.region}</span>
+                                    </div>
+                                    <div className="mt-1.5">
+                                        <StatusChip status={svc.status} label={svc.status_label} />
+                                    </div>
+                                </div>
+                                <div className="w-full sm:w-80">
+                                    <UptimeBars days={svc.days} uptime90={svc.uptime90} />
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                </Card>
+            </section>
+
+            {/* ── Recent incidents ── */}
+            <section className="mt-10">
+                <div className="mb-3 flex items-center justify-between">
+                    <MonoLabel>Recent incidents</MonoLabel>
+                    <Link href="/incidents" className="focus-ring rounded font-mono text-[11px] text-zinc-400 transition-colors hover:text-white">
+                        all incidents →
+                    </Link>
+                </div>
+                <div className="space-y-2">
+                    {recent.map((inc) => (
+                        <Link key={inc.id} href={`/incidents/${inc.slug}`} className="focus-ring block">
+                            <Card className="p-4 transition-colors hover:bg-panel">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2.5">
+                                        <span className={inc.status === 'resolved' ? 'text-zinc-500' : 'text-white'}>{inc.title}</span>
+                                        <SeverityChip severity={inc.severity} />
+                                    </div>
+                                    <span className="font-mono text-[11px] text-zinc-500">
+                                        {inc.status === 'resolved' ? 'resolved ' : ''}
+                                        <RelativeTime iso={inc.resolved_at || inc.created_at} />
+                                    </span>
+                                </div>
+                            </Card>
+                        </Link>
+                    ))}
+                </div>
+            </section>
+        </>
+    );
+}

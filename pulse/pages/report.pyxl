@@ -1,0 +1,149 @@
+import logging
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class NewIncident(BaseModel):
+    """The @action body model. Pyxle parses, coerces, and validates the request
+    body against this before the action runs — a bad field never reaches the DB,
+    and the client gets a 422 with a per-field error map."""
+
+    title: str = Field(min_length=6, max_length=120)
+    severity: Literal["minor", "major", "critical", "maintenance"]
+    service: str = Field(min_length=2, max_length=80)
+    summary: str = Field(min_length=12, max_length=400)
+
+
+@server
+async def load(request):
+    from db import service_names
+
+    return {"services": await service_names()}
+
+
+@action
+async def open_incident(request, body: NewIncident):
+    # `body` is a validated NewIncident — no manual parsing or checks here.
+    from pyxle import cache
+
+    from db import create_incident
+
+    slug = await create_incident(body.title, body.severity, body.service, body.summary)
+
+    # Write-through: the homepage is ISR-cached, so purge it now and the new
+    # incident shows on the next request instead of waiting out the 10s window.
+    await cache.invalidate("/")
+
+    # Fan out notifications AFTER the response — background tasks. The user gets
+    # an instant redirect; the (simulated) email/Slack work happens off the path.
+    request.state.background.add_task(_notify_subscribers, slug, body.title)
+    return {"slug": slug}
+
+
+def _notify_subscribers(slug: str, title: str) -> None:
+    # A stand-in for emailing subscribers / posting to Slack. Runs post-response.
+    logging.getLogger("pulse").info("notify: opened incident %s — %s", slug, title)
+
+
+import React, { useState } from 'react';
+import { Head, useAction, navigate } from 'pyxle/client';
+import { MonoLabel, FeatureTag, Card } from './components/ui.jsx';
+
+export const slots = {};
+export const createSlots = () => slots;
+
+const SEVERITIES = ['minor', 'major', 'critical', 'maintenance'];
+
+function FieldError({ messages }) {
+    if (!messages || !messages.length) return null;
+    return <p className="mt-1.5 font-mono text-[11px] text-red-400">{messages[0]}</p>;
+}
+
+export default function ReportPage({ data }) {
+    const open = useAction('open_incident');
+    const [form, setForm] = useState({ title: '', severity: 'major', service: data.services[0] || '', summary: '' });
+    const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+    const fields = open.fields || {};
+
+    const submit = async (e) => {
+        e.preventDefault();
+        const res = await open(form);
+        if (res && res.ok && res.slug) navigate(`/incidents/${res.slug}`);
+    };
+
+    const inputCls = 'focus-ring w-full rounded-lg border border-white/10 bg-ink px-3 py-2.5 text-sm text-zinc-200 placeholder:text-zinc-600';
+
+    return (
+        <>
+            <Head>
+                <title>Report an incident — Pulse</title>
+                <meta name="robots" content="noindex" />
+                <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+            </Head>
+
+            <section className="mx-auto max-w-2xl pt-10">
+                <div className="flex flex-wrap items-center gap-2">
+                    <MonoLabel>New incident</MonoLabel>
+                    <FeatureTag>@action</FeatureTag>
+                    <FeatureTag>Pydantic validation</FeatureTag>
+                    <FeatureTag>background task</FeatureTag>
+                </div>
+                <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">Report an incident</h1>
+                <p className="mt-3 text-zinc-400">
+                    The form posts a typed body to a Pydantic-validated <code className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[13px] text-signal-400">@action</code>.
+                    Bad input comes back as a 422 with per-field messages; a good one opens the
+                    incident and enqueues a background notification.
+                </p>
+
+                <Card className="mt-7 p-6">
+                    <form onSubmit={submit} className="space-y-5">
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-zinc-300">Title</label>
+                            <input value={form.title} onChange={set('title')} placeholder="Short, specific summary of what's wrong" className={inputCls} />
+                            <FieldError messages={fields.title} />
+                            <p className="mt-1 font-mono text-[10px] text-zinc-600">try fewer than 6 characters to see validation</p>
+                        </div>
+
+                        <div className="grid gap-5 sm:grid-cols-2">
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-zinc-300">Severity</label>
+                                <select value={form.severity} onChange={set('severity')} className={inputCls}>
+                                    {SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                                <FieldError messages={fields.severity} />
+                            </div>
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-zinc-300">Affected service</label>
+                                <select value={form.service} onChange={set('service')} className={inputCls}>
+                                    {data.services.map((s) => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                                <FieldError messages={fields.service} />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-zinc-300">What's happening?</label>
+                            <textarea value={form.summary} onChange={set('summary')} rows={4} placeholder="Impact, scope, and what you're seeing." className={`${inputCls} resize-none`} />
+                            <FieldError messages={fields.summary} />
+                        </div>
+
+                        {open.error && !Object.keys(fields).length && (
+                            <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-300">{open.error}</p>
+                        )}
+
+                        <div className="flex items-center justify-end gap-3">
+                            <button
+                                type="submit"
+                                disabled={open.pending}
+                                className="focus-ring rounded-lg bg-gradient-to-r from-signal-400 to-signal-600 px-5 py-2.5 text-sm font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-50"
+                            >
+                                {open.pending ? 'Opening…' : 'Open incident'}
+                            </button>
+                        </div>
+                    </form>
+                </Card>
+            </section>
+        </>
+    );
+}
